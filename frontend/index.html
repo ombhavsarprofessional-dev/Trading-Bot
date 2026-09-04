@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NSE Swing Trader - Double Bottom Pivot & RSI Divergence</title>
+  <meta name="description" content="Algorithmic swing trading screener and semi-automated execution bot for Indian equities on NSE.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+
+  <!-- =========================================================================
+       LOGIN SCREEN
+       ========================================================================= -->
+  <div id="loginSection" class="login-wrapper">
+    <div class="login-card">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <div class="brand-icon" style="margin: 0 auto 12px; width: 48px; height: 48px; font-size: 22px;">NSE</div>
+        <h2 style="font-size: 20px; font-weight: 700;">Swing Trading Bot</h2>
+        <p style="color: var(--text-muted); font-size: 13px;">Sign in to access daily screener & broker execution</p>
+      </div>
+
+      <div id="loginError" style="display: none; padding: 10px 14px; background: var(--danger-bg); border: 1px solid var(--danger-border); border-radius: var(--radius-md); color: var(--danger); font-size: 13px; margin-bottom: 16px;"></div>
+
+      <form id="loginForm">
+        <div class="form-group">
+          <label class="form-label" for="username">Username</label>
+          <input type="text" id="username" class="form-input" placeholder="admin" required autocomplete="username">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="password">Password</label>
+          <input type="password" id="password" class="form-input" placeholder="••••••••" required autocomplete="current-password">
+        </div>
+        <button type="submit" id="loginSubmitBtn" class="btn btn-primary" style="width: 100%; padding: 12px; margin-top: 8px;">
+          Authenticate & Enter
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- =========================================================================
+       MAIN DASHBOARD
+       ========================================================================= -->
+  <div id="dashboardSection" style="display: none;">
+    <!-- Top Navbar -->
+    <header class="top-navbar">
+      <div class="brand-container">
+        <div class="brand-icon">NSE</div>
+        <div>
+          <h1 class="brand-title">NSE Swing Trading Terminal</h1>
+          <div class="brand-subtitle">Double Pivot Support Confluence + RSI Bullish Divergence</div>
+        </div>
+      </div>
+
+      <div class="market-status-bar">
+        <div class="status-indicator-pill">
+          <span class="pulse-dot" id="marketDot"></span>
+          <span id="marketStatusText">Market Closed (Daily Scan at 3:30 PM IST)</span>
+        </div>
+
+        <div class="status-indicator-pill">
+          <span style="color: var(--text-muted);">IST Time:</span>
+          <strong id="liveIstClock">--:--:--</strong>
+        </div>
+
+        <div class="status-indicator-pill">
+          <span style="color: var(--text-muted);">Broker:</span>
+          <strong id="brokerModeTag" class="text-accent">MOCK (Paper Trading)</strong>
+        </div>
+      </div>
+
+      <div class="user-controls">
+        <span style="color: var(--text-secondary); font-size: 13px;" id="userNameDisplay">admin</span>
+        <button id="logoutBtn" class="btn btn-ghost btn-sm" title="Log out">Logout</button>
+      </div>
+    </header>
+
+    <!-- Main Container -->
+    <main class="main-container">
+      <!-- Top Metrics Overview -->
+      <section class="metrics-grid">
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-title">NSE Universe</span>
+            <span class="metric-icon">🏢</span>
+          </div>
+          <div class="metric-value" id="statUniverseCount">--</div>
+          <div class="metric-subtext">Market Cap &gt; ₹2,000 Cr</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-title">Active Signals</span>
+            <span class="metric-icon">🎯</span>
+          </div>
+          <div class="metric-value text-accent" id="statSignalsCount">0</div>
+          <div class="metric-subtext">Pending user approval</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-title">Active Trades</span>
+            <span class="metric-icon">📈</span>
+          </div>
+          <div class="metric-value text-success" id="statActiveTradesCount">0</div>
+          <div class="metric-subtext" id="statCapitalDeployed">Deployed: ₹0</div>
+        </div>
+
+        <div class="metric-card">
+          <div class="metric-header">
+            <span class="metric-title">Realized P&amp;L</span>
+            <span class="metric-icon">💰</span>
+          </div>
+          <div class="metric-value" id="statRealizedPnl">₹0.00</div>
+          <div class="metric-subtext" id="statWinRate">Win Rate: 0% (0 trades)</div>
+        </div>
+      </section>
+
+      <!-- Navigation Tabs & Manual Actions -->
+      <div class="tabs-container">
+        <nav class="nav-tabs" aria-label="Dashboard views">
+          <button class="tab-btn active" data-tab="signalsTab">
+            Daily Screener Signals
+            <span class="badge-count" id="signalsBadgeCount">0</span>
+          </button>
+          <button class="tab-btn" data-tab="activeTradesTab">
+            Active Positions
+            <span class="badge-count" id="activeTradesBadgeCount">0</span>
+          </button>
+          <button class="tab-btn" data-tab="historyTab">
+            Trade History
+          </button>
+          <button class="tab-btn" data-tab="systemLogsTab">
+            System &amp; Scheduler
+          </button>
+        </nav>
+
+        <div class="tab-actions">
+          <select id="scanLimitSelector" class="form-input" style="width: 140px; padding: 7px 10px; font-size: 12px;">
+            <option value="50">Quick (50 Stocks)</option>
+            <option value="150">Top 150 Stocks</option>
+            <option value="500">Nifty 500 (~500)</option>
+            <option value="">Full NSE Universe</option>
+          </select>
+
+          <button id="triggerScanBtn" class="btn btn-primary">
+            <span id="scanSpinner" style="display: none;">⏳</span>
+            <span>⚡ Run Screener Now</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- TAB 1: SCREENER SIGNALS -->
+      <section id="signalsTab" class="tab-content active">
+        <div class="table-card">
+          <div class="table-responsive">
+            <table class="data-table" id="signalsTable">
+              <thead>
+                <tr>
+                  <th>Score</th>
+                  <th>Stock Symbol</th>
+                  <th>Current Price</th>
+                  <th>Confluence Zone</th>
+                  <th>RSI &amp; Divergence</th>
+                  <th>Suggested Entry</th>
+                  <th>Target (+15%)</th>
+                  <th>Stop Loss (-0.5%)</th>
+                  <th>R:R</th>
+                  <th>Market Cap</th>
+                  <th style="text-align: right;">Action</th>
+                </tr>
+              </thead>
+              <tbody id="signalsTableBody">
+                <tr>
+                  <td colspan="11">
+                    <div class="empty-state">
+                      <div class="empty-icon">📊</div>
+                      <div>No signals generated yet.</div>
+                      <div style="font-size: 12px; margin-top: 6px;">Click <strong>"Run Screener Now"</strong> above or wait for the 3:30 PM IST daily run.</div>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: ACTIVE TRADES -->
+      <section id="activeTradesTab" class="tab-content">
+        <div class="table-card">
+          <div class="table-responsive">
+            <table class="data-table" id="activeTradesTable">
+              <thead>
+                <tr>
+                  <th>Trade ID</th>
+                  <th>Symbol</th>
+                  <th>Quantity</th>
+                  <th>Entry Price</th>
+                  <th>Current Price</th>
+                  <th>Target (+15%)</th>
+                  <th>Stop Loss</th>
+                  <th>Unrealized P&amp;L</th>
+                  <th>Target Progress</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="activeTradesTableBody">
+                <tr>
+                  <td colspan="10">
+                    <div class="empty-state">
+                      <div class="empty-icon">💼</div>
+                      <div>No active trades open.</div>
+                      <div style="font-size: 12px; margin-top: 6px;">Approve a screener signal to dispatch order to broker.</div>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: TRADE HISTORY -->
+      <section id="historyTab" class="tab-content">
+        <div class="table-card">
+          <div class="table-responsive">
+            <table class="data-table" id="historyTable">
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Symbol</th>
+                  <th>Entry Date</th>
+                  <th>Exit Date</th>
+                  <th>Qty</th>
+                  <th>Entry Price</th>
+                  <th>Exit Price</th>
+                  <th>Realized P&amp;L</th>
+                  <th>Return (%)</th>
+                  <th>Status</th>
+                  <th>Notes</th>
+                </tr>
+              </thead>
+              <tbody id="historyTableBody">
+                <tr>
+                  <td colspan="11">
+                    <div class="empty-state">
+                      <div class="empty-icon">📜</div>
+                      <div>No trade history available yet.</div>
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: SYSTEM & LOGS -->
+      <section id="systemLogsTab" class="tab-content">
+        <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 16px;">
+          <!-- System Status Card -->
+          <div class="table-card" style="padding: 20px;">
+            <h3 style="font-size: 15px; font-weight: 700; margin-bottom: 16px;">Daily Scheduler Configuration</h3>
+            
+            <div style="display: flex; flex-direction: column; gap: 12px; font-size: 13px;">
+              <div>
+                <div style="color: var(--text-muted); font-size: 11px;">SCHEDULED RUN TIME</div>
+                <div style="font-weight: 600;">Mon - Fri at 3:30 PM IST (Market Close)</div>
+              </div>
+              <div>
+                <div style="color: var(--text-muted); font-size: 11px;">NEXT AUTOMATED RUN</div>
+                <div id="schedNextRun" style="font-weight: 600; color: var(--info);">--</div>
+              </div>
+              <div>
+                <div style="color: var(--text-muted); font-size: 11px;">LAST SCAN STATUS</div>
+                <div id="schedLastStatus" style="font-weight: 600;">--</div>
+              </div>
+              <div>
+                <div style="color: var(--text-muted); font-size: 11px;">EXECUTION RULES</div>
+                <ul style="padding-left: 18px; color: var(--text-secondary); margin-top: 4px; line-height: 1.6;">
+                  <li>Universe: Market Cap &gt; ₹2,000 Cr</li>
+                  <li>Criteria 1: Traditional S1/S2 gap &lt; 1.5%</li>
+                  <li>Criteria 2: Fibonacci S1/S2 within 1%</li>
+                  <li>Criteria 3: RSI Divergence in last 10 bars (RSI &le; 40)</li>
+                  <li>Trade: ₹10,000 capital, +15% Target, -0.5% below S2 SL</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <!-- Logs Card -->
+          <div class="table-card" style="padding: 20px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+              <h3 style="font-size: 15px; font-weight: 700;">System Event Logs</h3>
+              <button id="refreshLogsBtn" class="btn btn-ghost btn-sm">Refresh</button>
+            </div>
+            <div style="max-height: 340px; overflow-y: auto; font-family: monospace; font-size: 12px; background: rgba(0,0,0,0.3); padding: 12px; border-radius: var(--radius-md);" id="systemLogsContainer">
+              Loading logs...
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- =========================================================================
+       ORDER APPROVAL MODAL
+       ========================================================================= -->
+  <div id="approvalModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 class="modal-title">Confirm Trade Approval</h3>
+        <button class="modal-close" id="closeModalBtn">&times;</button>
+      </div>
+
+      <div style="margin-bottom: 16px; font-size: 13px; color: var(--text-secondary);">
+        Please verify position sizing and order levels before sending to broker:
+      </div>
+
+      <div class="order-summary-grid">
+        <div class="summary-item">
+          <span class="summary-label">Stock Symbol</span>
+          <span class="summary-value" id="modalSymbol">--</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Company</span>
+          <span class="summary-value" id="modalCompany" style="font-size: 12px;">--</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Entry Price</span>
+          <span class="summary-value text-accent" id="modalEntry">₹0.00</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Capital Allocated</span>
+          <span class="summary-value" id="modalCapital">₹10,000</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Calculated Quantity</span>
+          <span class="summary-value" id="modalQuantity">0 Shares</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Total Investment</span>
+          <span class="summary-value" id="modalInvestment">₹0.00</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Target (+15%)</span>
+          <span class="summary-value text-success" id="modalTarget">₹0.00</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Stop Loss (-0.5% below S2)</span>
+          <span class="summary-value text-danger" id="modalStopLoss">₹0.00</span>
+        </div>
+      </div>
+
+      <div style="padding: 10px 14px; background: rgba(99, 102, 241, 0.1); border-left: 3px solid var(--accent-primary); border-radius: var(--radius-sm); font-size: 12px; color: var(--text-secondary);">
+        <strong>Broker Action:</strong> Will place CNC Buy Delivery order and register GTT OCO Target (+15%) &amp; Stop Loss triggers.
+      </div>
+
+      <div class="modal-actions">
+        <button id="cancelModalBtn" class="btn btn-ghost">Cancel</button>
+        <button id="confirmApproveBtn" class="btn btn-success">
+          <span id="modalBtnSpinner" style="display: none;">⏳</span>
+          Confirm &amp; Place Order
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/app.js"></script>
+</body>
+</html>
