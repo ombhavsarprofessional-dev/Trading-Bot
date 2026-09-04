@@ -29,6 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
+import difflib
 from config import (
     MIN_MARKET_CAP_INR,
     TRADE_CAPITAL_INR,
@@ -37,7 +38,11 @@ from config import (
     BATCH_SIZE,
     BATCH_DELAY_SECONDS,
 )
-from screener.stock_fetcher import filter_stocks_by_market_cap
+from screener.stock_fetcher import (
+    filter_stocks_by_market_cap,
+    fetch_all_stocks,
+    normalize_company_name,
+)
 from screener.pivot_calculator import evaluate_pivot_confluence
 from screener.divergence_detector import detect_bullish_divergence
 
@@ -97,6 +102,8 @@ def evaluate_stock(
     company_name: str,
     market_cap: float,
     df: pd.DataFrame,
+    exchange: str = "NSE",
+    dual_listed: bool = False,
 ) -> Optional[Dict[str, Any]]:
     """
     Evaluates a single stock against ALL 3 technical criteria.
@@ -161,6 +168,8 @@ def evaluate_stock(
     return {
         "symbol": symbol,
         "company_name": company_name,
+        "exchange": exchange,
+        "dual_listed": dual_listed,
         "current_price": entry_price,
         "suggested_entry": entry_price,
         "traditional_s1": trad["S1"],
@@ -182,6 +191,54 @@ def evaluate_stock(
     }
 
 
+def deduplicate_signals(signals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Post-screening deduplication by company name:
+    - Normalizes company name (stripping ltd/limited, pvt, case, punctuation)
+    - If same company appears from both NSE and BSE, keeps NSE signal
+    - Sets dual_listed=True on surviving signal
+    """
+    if not signals:
+        return []
+
+    accepted: List[tuple] = []  # List of (norm_name, signal_dict)
+
+    for sig in signals:
+        norm = normalize_company_name(sig.get("company_name", ""))
+        matched_idx = None
+
+        for idx, (acc_norm, acc_sig) in enumerate(accepted):
+            if norm and acc_norm:
+                if norm == acc_norm:
+                    matched_idx = idx
+                    break
+                if len(norm) >= 4 and len(acc_norm) >= 4:
+                    if difflib.SequenceMatcher(None, norm, acc_norm).ratio() >= 0.88:
+                        matched_idx = idx
+                        break
+
+        if matched_idx is not None:
+            acc_norm, acc_sig = accepted[matched_idx]
+            # Company appears multiple times (e.g. from NSE and BSE)
+            acc_sig["dual_listed"] = True
+            sig["dual_listed"] = True
+
+            # If existing is BSE and incoming is NSE, replace with NSE version (better liquidity)
+            if acc_sig.get("exchange") == "BSE" and sig.get("exchange") == "NSE":
+                accepted[matched_idx] = (norm, sig)
+                logger.info(
+                    f"Dedup: Replacing BSE signal {acc_sig['symbol']} with NSE signal {sig['symbol']} for '{sig['company_name']}'."
+                )
+            else:
+                logger.info(
+                    f"Dedup: Retaining existing {acc_sig['exchange']} signal {acc_sig['symbol']} over {sig['symbol']} for '{sig['company_name']}'."
+                )
+        else:
+            accepted.append((norm, sig))
+
+    return [sig for _, sig in accepted]
+
+
 def run_screener_engine(
     universe: Optional[List[Dict]] = None,
     limit_universe: Optional[int] = None,
@@ -191,17 +248,17 @@ def run_screener_engine(
 ) -> List[Dict[str, Any]]:
     """
     Executes the full screener process:
-    1. Obtains market cap filtered stocks (> ₹2000 Cr)
+    1. Obtains combined market cap filtered stocks from NSE & BSE (> ₹2000 Cr)
     2. Fetches historical daily candles (6 months)
     3. Evaluates all 3 criteria
-    4. Returns sorted list of qualifying signals (highest score first)
+    4. Deduplicates multi-exchange signals
+    5. Returns sorted list of qualifying signals (highest score first)
     """
     if universe is None:
-        logger.info("Fetching qualifying stocks from NSE universe (> INR 2000 Cr)...")
-        universe = filter_stocks_by_market_cap(
+        logger.info("Fetching qualifying stocks from NSE + BSE universe (> INR 2000 Cr)...")
+        universe = fetch_all_stocks(
             limit=limit_universe,
-            batch_size=batch_size,
-            batch_delay=batch_delay,
+            progress_callback=progress_callback,
         )
 
     if limit_universe and len(universe) > limit_universe:
@@ -246,7 +303,6 @@ def run_screener_engine(
                 else:
                     df = data.dropna(how="all").copy()
 
-
                 # Ensure sufficient data and valid columns
                 if df.empty or len(df) < 20 or "Close" not in df.columns:
                     continue
@@ -257,11 +313,13 @@ def run_screener_engine(
                     company_name=meta["company_name"],
                     market_cap=meta["market_cap"],
                     df=df,
+                    exchange=meta.get("exchange", "NSE"),
+                    dual_listed=meta.get("dual_listed", False),
                 )
 
                 if signal is not None:
                     logger.info(
-                        f"*** MATCH FOUND ***: {sym} ({meta['company_name']}) "
+                        f"*** MATCH FOUND ***: {sym} ({meta['company_name']}) [{signal['exchange']}] "
                         f"Score: {signal['score']}/10, Entry: INR {signal['suggested_entry']}, "
                         f"Target: INR {signal['target_price']}, SL: INR {signal['stop_loss']}"
                     )
@@ -275,6 +333,9 @@ def run_screener_engine(
 
         if i + batch_size < total and batch_delay > 0:
             time.sleep(batch_delay)
+
+    # Deduplicate signals across exchanges (e.g. RELIANCE.NS vs 500325.BO)
+    signals = deduplicate_signals(signals)
 
     # Sort signals by Score (descending), then Confluence closeness
     signals.sort(key=lambda s: s["score"], reverse=True)

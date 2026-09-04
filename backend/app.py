@@ -117,9 +117,13 @@ def get_signals():
     """Returns the latest daily screener results."""
     limit = int(request.args.get("limit", 100))
     signals = get_latest_signals(limit=limit)
+    nse_count = sum(1 for s in signals if (s.get("exchange") or "NSE").upper() == "NSE")
+    bse_count = sum(1 for s in signals if (s.get("exchange") or "").upper() == "BSE")
     return jsonify({
         "success": True,
         "count": len(signals),
+        "nse_count": nse_count,
+        "bse_count": bse_count,
         "signals": signals,
     })
 

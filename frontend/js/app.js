@@ -99,8 +99,8 @@ async function verifySessionAndLoad() {
     if (res.ok) {
       showDashboard();
       loadAllDashboardData();
-      // Start auto-poll every 15 seconds
-      pollTimer = setInterval(loadAllDashboardData, 15000);
+      // Start auto-poll (default 60s when idle, 5s when scanning)
+      scheduleDynamicPoll(60000);
     } else {
       showLogin();
     }
@@ -154,6 +154,82 @@ async function loadAllDashboardData() {
   ]);
 }
 
+// Helper Functions for UI formatting
+function getStarRating(score) {
+  const numScore = Number(score) || 0;
+  const fullStars = Math.min(5, Math.max(1, Math.round(numScore / 2)));
+  return "★".repeat(fullStars) + "☆".repeat(5 - fullStars);
+}
+
+function getRsiBadge(rsi) {
+  if (rsi == null || isNaN(rsi)) {
+    return '<span class="rsi-tag rsi-neutral">--</span>';
+  }
+  const val = Number(rsi);
+  if (val < 30) {
+    return `<span class="rsi-tag rsi-oversold-deep" title="Deep Oversold (<30)">${val.toFixed(1)} (Deep OS)</span>`;
+  } else if (val <= 40) {
+    return `<span class="rsi-tag rsi-oversold-mild" title="Oversold Zone (30-40)">${val.toFixed(1)} (Oversold)</span>`;
+  } else {
+    return `<span class="rsi-tag rsi-neutral">${val.toFixed(1)}</span>`;
+  }
+}
+
+function getExchangeBadge(exchange, isDualListed) {
+  const ex = (exchange || "NSE").toUpperCase();
+  const cls = ex === "BSE" ? "badge-bse" : "badge-nse";
+  let html = `<span class="exchange-badge ${cls}">${ex}</span>`;
+  if (isDualListed) {
+    html += ` <span class="exchange-badge badge-dual" title="Dual Listed on NSE and BSE">Dual Listed</span>`;
+  }
+  return html;
+}
+
+function formatLastScanTime(timeStr) {
+  if (!timeStr) return "Today 03:32 PM IST";
+  try {
+    const parts = timeStr.split(" ");
+    if (parts.length >= 2) {
+      const timePart = parts[1];
+      const [h, m] = timePart.split(":");
+      const hourNum = parseInt(h, 10);
+      const ampm = hourNum >= 12 ? "PM" : "AM";
+      const displayHour = hourNum % 12 || 12;
+      return `Today ${String(displayHour).padStart(2, "0")}:${m} ${ampm} IST`;
+    }
+    return `Today ${timeStr} IST`;
+  } catch (e) {
+    return `Today ${timeStr} IST`;
+  }
+}
+
+window.switchSignalsView = function (mode) {
+  const cardsContainer = document.getElementById("signalsCardsContainer");
+  const tableContainer = document.getElementById("signalsTableContainer");
+  const cardsBtn = document.getElementById("viewCardsBtn");
+  const tableBtn = document.getElementById("viewTableBtn");
+
+  if (mode === "cards") {
+    if (cardsContainer) cardsContainer.style.display = "grid";
+    if (tableContainer) tableContainer.style.display = "none";
+    if (cardsBtn) cardsBtn.classList.add("active");
+    if (tableBtn) tableBtn.classList.remove("active");
+  } else {
+    if (cardsContainer) cardsContainer.style.display = "none";
+    if (tableContainer) tableContainer.style.display = "block";
+    if (tableBtn) tableBtn.classList.add("active");
+    if (cardsBtn) cardsBtn.classList.remove("active");
+  }
+};
+
+let currentPollInterval = 60000;
+function scheduleDynamicPoll(intervalMs) {
+  if (intervalMs === currentPollInterval && pollTimer) return;
+  currentPollInterval = intervalMs;
+  if (pollTimer) clearInterval(pollTimer);
+  pollTimer = setInterval(loadAllDashboardData, intervalMs);
+}
+
 // 1. Screener Signals
 async function fetchSignals() {
   try {
@@ -162,21 +238,43 @@ async function fetchSignals() {
     const data = await res.json();
 
     const tbody = document.getElementById("signalsTableBody");
+    const cardsContainer = document.getElementById("signalsCardsContainer");
     const countEl = document.getElementById("statSignalsCount");
     const badgeEl = document.getElementById("signalsBadgeCount");
+    const summaryPill = document.getElementById("stockCountSummary");
+    const summaryChip = document.getElementById("signalsCountChip");
+
+    const nseCount = data.nse_count != null ? data.nse_count : (data.signals || []).filter(s => (s.exchange || "NSE").toUpperCase() === "NSE").length;
+    const bseCount = data.bse_count != null ? data.bse_count : (data.signals || []).filter(s => (s.exchange || "").toUpperCase() === "BSE").length;
+    const totalSignals = (data.signals || []).length;
+
+    const summaryText = `Found ${totalSignals} signals — NSE: ${nseCount} | BSE: ${bseCount}`;
+    if (summaryPill) summaryPill.textContent = summaryText;
+    if (summaryChip) summaryChip.textContent = summaryText;
 
     if (!data.signals || data.signals.length === 0) {
-      tbody.innerHTML = `
-        <tr>
-          <td colspan="11">
-            <div class="empty-state">
-              <div class="empty-icon">📊</div>
-              <div>No signals generated yet.</div>
-              <div style="font-size: 12px; margin-top: 6px;">Click <strong>"Run Screener Now"</strong> above or wait for the 3:30 PM IST daily run.</div>
-            </div>
-          </td>
-        </tr>
-      `;
+      if (tbody) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="12">
+              <div class="empty-state">
+                <div class="empty-icon">📊</div>
+                <div>No signals generated yet.</div>
+                <div style="font-size: 12px; margin-top: 6px;">Click <strong>"Run Screener Now"</strong> above or wait for the 3:30 PM IST daily run.</div>
+              </div>
+            </td>
+          </tr>
+        `;
+      }
+      if (cardsContainer) {
+        cardsContainer.innerHTML = `
+          <div class="empty-state" style="grid-column: 1 / -1;">
+            <div class="empty-icon">📊</div>
+            <div>No signals generated yet.</div>
+            <div style="font-size: 12px; margin-top: 6px;">Click <strong>"Run Screener Now"</strong> above or wait for the 3:30 PM IST daily run.</div>
+          </div>
+        `;
+      }
       countEl.textContent = "0";
       badgeEl.textContent = "0";
       return;
@@ -186,53 +284,144 @@ async function fetchSignals() {
     countEl.textContent = pendingSignals.length;
     badgeEl.textContent = pendingSignals.length;
 
-    tbody.innerHTML = data.signals.map((sig) => {
-      const scoreClass = sig.score >= 8 ? "score-high" : (sig.score >= 5 ? "score-med" : "score-low");
-      const isPending = sig.status === "PENDING";
-      const isApproved = sig.status === "APPROVED";
+    // Render Cards View
+    if (cardsContainer) {
+      cardsContainer.innerHTML = data.signals.map((sig) => {
+        const scoreClass = sig.score >= 8 ? "score-high" : (sig.score >= 5 ? "score-med" : "score-low");
+        const isPending = sig.status === "PENDING";
+        const isApproved = sig.status === "APPROVED";
+        const stars = getStarRating(sig.score);
+        const exBadges = getExchangeBadge(sig.exchange, sig.dual_listed);
+        const rsiBadge = getRsiBadge(sig.rsi_value);
 
-      return `
-        <tr data-signal-id="${sig.id}">
-          <td>
-            <div class="score-badge ${scoreClass}">${sig.score}</div>
-          </td>
-          <td>
-            <div class="stock-symbol">${sig.symbol}</div>
-            <div class="company-name" title="${sig.company_name}">${sig.company_name}</div>
-          </td>
-          <td><strong>₹${sig.current_price.toFixed(2)}</strong></td>
-          <td>
-            <div style="font-size: 12px;">
-              <span style="color: var(--text-muted);">Trad:</span> S1 ₹${sig.traditional_s1} | S2 ₹${sig.traditional_s2}<br>
-              <span style="color: var(--text-muted);">Fib:</span> S1 ₹${sig.fibonacci_s1} | S2 ₹${sig.fibonacci_s2}
+        return `
+          <div class="signal-card" data-signal-id="${sig.id}">
+            <div class="card-header-row">
+              <div class="card-title-group">
+                <div class="card-symbol-line">
+                  <span class="card-symbol">${sig.symbol}</span>
+                  ${exBadges}
+                </div>
+                <div class="card-company" title="${sig.company_name}">${sig.company_name}</div>
+              </div>
+              <div class="card-score-box">
+                <div class="score-badge ${scoreClass}">${sig.score}/10</div>
+                <div class="star-rating" title="Signal Score: ${sig.score}/10">${stars}</div>
+              </div>
             </div>
-          </td>
-          <td>
-            <div style="font-size: 12px;">
-              RSI: <strong>${sig.rsi_value || "--"}</strong><br>
-              <span class="tag-badge tag-success">Bullish Div ✓</span>
+
+            <div class="card-price-row">
+              <div class="card-price-cell">
+                <span class="price-lbl">Current</span>
+                <span class="price-val">₹${sig.current_price.toFixed(2)}</span>
+              </div>
+              <div class="card-price-cell">
+                <span class="price-lbl">Entry</span>
+                <span class="price-val text-accent">₹${sig.suggested_entry.toFixed(2)}</span>
+              </div>
+              <div class="card-price-cell">
+                <span class="price-lbl">Target (+15%)</span>
+                <span class="price-val text-success">₹${sig.target_price.toFixed(2)}</span>
+              </div>
+              <div class="card-price-cell">
+                <span class="price-lbl">SL (-0.5%)</span>
+                <span class="price-val text-danger">₹${sig.stop_loss.toFixed(2)}</span>
+              </div>
             </div>
-          </td>
-          <td><strong class="text-accent">₹${sig.suggested_entry.toFixed(2)}</strong></td>
-          <td><strong class="text-success">₹${sig.target_price.toFixed(2)}</strong></td>
-          <td><strong class="text-danger">₹${sig.stop_loss.toFixed(2)}</strong></td>
-          <td>${sig.risk_reward_ratio ? sig.risk_reward_ratio.toFixed(1) + ":1" : "--"}</td>
-          <td>₹${Number(sig.market_cap_cr).toLocaleString()} Cr</td>
-          <td style="text-align: right; white-space: nowrap;">
-            ${
-              isPending
-                ? `
-                  <button class="btn btn-success btn-sm approve-btn" onclick="openApprovalModal(${sig.id})">Approve</button>
-                  <button class="btn btn-ghost btn-sm reject-btn" onclick="rejectSignal(${sig.id})" style="margin-left: 6px;">Reject</button>
-                `
-                : isApproved
-                ? `<span class="tag-badge tag-success">Approved ✓</span>`
-                : `<span class="tag-badge tag-danger">Rejected ✗</span>`
-            }
-          </td>
-        </tr>
-      `;
-    }).join("");
+
+            <div class="card-technicals-box">
+              <div class="tech-level-line">
+                <span>Trad S1/S2: ₹${sig.traditional_s1} / ₹${sig.traditional_s2}</span>
+                <span>Fib S1/S2: ₹${sig.fibonacci_s1} / ₹${sig.fibonacci_s2}</span>
+              </div>
+              <div class="tech-level-line" style="align-items: center;">
+                <div>RSI: ${rsiBadge}</div>
+                <span class="tag-badge tag-success">Bullish Div ✓</span>
+              </div>
+            </div>
+
+            <div class="card-action-bar">
+              <div>
+                <span class="rr-pill">R:R ${sig.risk_reward_ratio ? sig.risk_reward_ratio.toFixed(1) + ":1" : "--"}</span>
+                <span style="font-size: 11px; color: var(--text-muted); margin-left: 6px;">₹${Number(sig.market_cap_cr).toLocaleString()} Cr</span>
+              </div>
+              <div>
+                ${
+                  isPending
+                    ? `
+                      <button class="btn btn-success btn-sm approve-btn" onclick="openApprovalModal(${sig.id})">Approve</button>
+                      <button class="btn btn-ghost btn-sm reject-btn" onclick="rejectSignal(${sig.id})" style="margin-left: 6px;">Reject</button>
+                    `
+                    : isApproved
+                    ? `<span class="tag-badge tag-success">Approved ✓</span>`
+                    : `<span class="tag-badge tag-danger">Rejected ✗</span>`
+                }
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+    }
+
+    // Render Table View
+    if (tbody) {
+      tbody.innerHTML = data.signals.map((sig) => {
+        const scoreClass = sig.score >= 8 ? "score-high" : (sig.score >= 5 ? "score-med" : "score-low");
+        const isPending = sig.status === "PENDING";
+        const isApproved = sig.status === "APPROVED";
+        const stars = getStarRating(sig.score);
+        const exBadges = getExchangeBadge(sig.exchange, sig.dual_listed);
+        const rsiBadge = getRsiBadge(sig.rsi_value);
+
+        return `
+          <tr data-signal-id="${sig.id}">
+            <td>
+              <div style="display: flex; flex-direction: column; align-items: flex-start; gap: 2px;">
+                <div class="score-badge ${scoreClass}">${sig.score}/10</div>
+                <div class="star-rating" style="font-size: 11px;">${stars}</div>
+              </div>
+            </td>
+            <td>
+              <div class="stock-symbol">${sig.symbol}</div>
+              <div class="company-name" title="${sig.company_name}">${sig.company_name}</div>
+            </td>
+            <td>
+              ${exBadges}
+            </td>
+            <td><strong>₹${sig.current_price.toFixed(2)}</strong></td>
+            <td>
+              <div style="font-size: 12px;">
+                <span style="color: var(--text-muted);">Trad:</span> S1 ₹${sig.traditional_s1} | S2 ₹${sig.traditional_s2}<br>
+                <span style="color: var(--text-muted);">Fib:</span> S1 ₹${sig.fibonacci_s1} | S2 ₹${sig.fibonacci_s2}
+              </div>
+            </td>
+            <td>
+              <div style="font-size: 12px;">
+                ${rsiBadge}<br>
+                <span class="tag-badge tag-success" style="margin-top: 3px;">Bullish Div ✓</span>
+              </div>
+            </td>
+            <td><strong class="text-accent">₹${sig.suggested_entry.toFixed(2)}</strong></td>
+            <td><strong class="text-success">₹${sig.target_price.toFixed(2)}</strong></td>
+            <td><strong class="text-danger">₹${sig.stop_loss.toFixed(2)}</strong></td>
+            <td>${sig.risk_reward_ratio ? sig.risk_reward_ratio.toFixed(1) + ":1" : "--"}</td>
+            <td>₹${Number(sig.market_cap_cr).toLocaleString()} Cr</td>
+            <td style="text-align: right; white-space: nowrap;">
+              ${
+                isPending
+                  ? `
+                    <button class="btn btn-success btn-sm approve-btn" onclick="openApprovalModal(${sig.id})">Approve</button>
+                    <button class="btn btn-ghost btn-sm reject-btn" onclick="rejectSignal(${sig.id})" style="margin-left: 6px;">Reject</button>
+                  `
+                  : isApproved
+                  ? `<span class="tag-badge tag-success">Approved ✓</span>`
+                  : `<span class="tag-badge tag-danger">Rejected ✗</span>`
+              }
+            </td>
+          </tr>
+        `;
+      }).join("");
+    }
   } catch (err) {
     console.error("Error fetching signals:", err);
   }
@@ -375,17 +564,66 @@ async function fetchSystemStatus() {
     if (!res.ok) return;
     const data = await res.json();
 
-    document.getElementById("brokerModeTag").textContent = data.broker_mode || "MOCK";
-    const sched = data.scheduler || {};
-    document.getElementById("schedNextRun").textContent = sched.next_run_time || "Scheduled at 3:30 PM IST";
-    document.getElementById("schedLastStatus").textContent = sched.last_run_status || "Ready";
+    const brokerTag = document.getElementById("brokerModeTag");
+    if (brokerTag) brokerTag.textContent = data.broker_mode || "MOCK";
 
-    if (sched.is_scanning) {
-      document.getElementById("scanSpinner").style.display = "inline-block";
-      document.getElementById("triggerScanBtn").disabled = true;
+    const sched = data.scheduler || {};
+    const nextRunEl = document.getElementById("schedNextRun");
+    if (nextRunEl) nextRunEl.textContent = sched.next_run_time || "Scheduled at 3:30 PM IST";
+
+    const lastStatusEl = document.getElementById("schedLastStatus");
+    if (lastStatusEl) lastStatusEl.textContent = sched.last_run_status || "Ready";
+
+    // 1. Update Last Scan Time Display
+    const lastScanFormatted = formatLastScanTime(sched.last_run_time);
+    const lastScanEl = document.getElementById("lastScannedDisplay");
+    if (lastScanEl) lastScanEl.textContent = lastScanFormatted;
+
+    // 2. Update Screener Status Bar & Progress
+    const statusTextEl = document.getElementById("screenerStatusText");
+    const progressStatsEl = document.getElementById("screenerProgressStats");
+    const progressBarEl = document.getElementById("screenerProgressBar");
+    const dotEl = document.getElementById("screenerDot");
+    const progress = sched.progress || {};
+
+    const isScanning = sched.is_scanning;
+    const scanSpinner = document.getElementById("scanSpinner");
+    const triggerBtn = document.getElementById("triggerScanBtn");
+
+    if (isScanning) {
+      if (scanSpinner) scanSpinner.style.display = "inline-block";
+      if (triggerBtn) triggerBtn.disabled = true;
+
+      const processed = progress.processed || 0;
+      const total = progress.total || 0;
+      const percent = progress.percent || (total > 0 ? Math.round((processed / total) * 100) : 20);
+
+      if (statusTextEl) statusTextEl.textContent = progress.status_text || `Scanning... ${processed}/${total} stocks processed`;
+      if (progressStatsEl) progressStatsEl.textContent = `${processed}/${total} stocks processed`;
+      if (progressBarEl) progressBarEl.style.width = `${percent}%`;
+
+      if (dotEl) {
+        dotEl.style.background = "var(--warning)";
+        dotEl.style.boxShadow = "0 0 10px var(--warning)";
+      }
+
+      // Fast poll while scanning
+      scheduleDynamicPoll(4000);
     } else {
-      document.getElementById("scanSpinner").style.display = "none";
-      document.getElementById("triggerScanBtn").disabled = false;
+      if (scanSpinner) scanSpinner.style.display = "none";
+      if (triggerBtn) triggerBtn.disabled = false;
+
+      if (statusTextEl) statusTextEl.textContent = "Scan Complete";
+      if (progressStatsEl) progressStatsEl.textContent = sched.last_run_status || "Ready";
+      if (progressBarEl) progressBarEl.style.width = "100%";
+
+      if (dotEl) {
+        dotEl.style.background = "var(--success)";
+        dotEl.style.boxShadow = "0 0 10px var(--success)";
+      }
+
+      // Auto refresh every 60 seconds when idle
+      scheduleDynamicPoll(60000);
     }
   } catch (err) {
     console.error("Error fetching system status:", err);

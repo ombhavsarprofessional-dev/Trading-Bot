@@ -33,6 +33,12 @@ _scheduler: Optional[BackgroundScheduler] = None
 _is_running_scan: bool = False
 _last_run_time: Optional[str] = None
 _last_run_status: Optional[str] = None
+_scan_progress: Dict[str, Any] = {
+    "processed": 0,
+    "total": 0,
+    "status_text": "Scan Complete",
+    "percent": 100,
+}
 
 
 def run_screener_job(limit_universe: Optional[int] = None) -> Dict[str, Any]:
@@ -40,7 +46,7 @@ def run_screener_job(limit_universe: Optional[int] = None) -> Dict[str, Any]:
     The actual task executed by the scheduler or triggered manually.
     Runs screener engine, saves signals to SQLite, logs status.
     """
-    global _is_running_scan, _last_run_time, _last_run_status
+    global _is_running_scan, _last_run_time, _last_run_status, _scan_progress
 
     if _is_running_scan:
         logger.warning("Screener scan is already in progress. Skipping duplicate run.")
@@ -54,8 +60,25 @@ def run_screener_job(limit_universe: Optional[int] = None) -> Dict[str, Any]:
     logger.info(log_msg)
     add_log("INFO", "SCHEDULER", log_msg)
 
+    _scan_progress = {
+        "processed": 0,
+        "total": 0,
+        "status_text": "Scanning... initializing stock universe...",
+        "percent": 0,
+    }
+
+    def on_progress(processed: int, total: int):
+        global _scan_progress
+        pct = int((processed / total) * 100) if total > 0 else 0
+        _scan_progress = {
+            "processed": processed,
+            "total": total,
+            "status_text": f"Scanning... {processed}/{total} stocks processed",
+            "percent": pct,
+        }
+
     try:
-        signals = run_screener_engine(limit_universe=limit_universe)
+        signals = run_screener_engine(limit_universe=limit_universe, progress_callback=on_progress)
         saved_ids = save_screener_results(signals)
 
         duration = (datetime.now() - start_time).total_seconds()
@@ -66,6 +89,13 @@ def run_screener_job(limit_universe: Optional[int] = None) -> Dict[str, Any]:
         logger.info(result_msg)
         add_log("INFO", "SCHEDULER", result_msg)
         _last_run_status = f"Completed ({len(signals)} signals found)"
+
+        _scan_progress = {
+            "processed": len(signals),
+            "total": len(signals),
+            "status_text": "Scan Complete",
+            "percent": 100,
+        }
 
         return {
             "status": "success",
@@ -79,6 +109,12 @@ def run_screener_job(limit_universe: Optional[int] = None) -> Dict[str, Any]:
         logger.error(error_msg, exc_info=True)
         add_log("ERROR", "SCHEDULER", error_msg)
         _last_run_status = f"Failed: {str(e)}"
+        _scan_progress = {
+            "processed": 0,
+            "total": 0,
+            "status_text": f"Scan Failed: {str(e)}",
+            "percent": 0,
+        }
         return {"status": "error", "message": str(e)}
 
     finally:
@@ -135,7 +171,7 @@ def stop_scheduler():
 
 def get_scheduler_status() -> Dict[str, Any]:
     """Returns the current state and next run time of the scheduler."""
-    global _scheduler, _is_running_scan, _last_run_time, _last_run_status
+    global _scheduler, _is_running_scan, _last_run_time, _last_run_status, _scan_progress
 
     if _scheduler is None:
         init_scheduler()
@@ -146,10 +182,10 @@ def get_scheduler_status() -> Dict[str, Any]:
     if next_time:
         next_run = next_time.strftime("%Y-%m-%d %H:%M:%S %Z")
 
-
     return {
         "running": _scheduler.running if _scheduler else False,
         "is_scanning": _is_running_scan,
+        "progress": _scan_progress,
         "timezone": TIMEZONE,
         "schedule_time": f"{DAILY_RUN_HOUR:02d}:{DAILY_RUN_MINUTE:02d} IST (Mon-Fri)",
         "next_run_time": next_run,

@@ -22,22 +22,26 @@ def insert_signal(signal_data: Dict[str, Any], db_path=None) -> int:
     conn = get_db_connection(db_path) if db_path else get_db_connection()
     scan_date = datetime.now().strftime("%Y-%m-%d")
     now_iso = datetime.now().isoformat()
+    exchange = signal_data.get("exchange", "NSE")
+    dual_listed = 1 if signal_data.get("dual_listed", False) else 0
 
     with conn:
         cursor = conn.cursor()
         cursor.execute(
             """
             INSERT INTO signals (
-                symbol, company_name, scan_date, current_price, suggested_entry,
+                symbol, company_name, exchange, dual_listed, scan_date, current_price, suggested_entry,
                 traditional_s1, traditional_s2, fibonacci_s1, fibonacci_s2,
                 rsi_value, rsi_signal_value, divergence_confirmed, divergence_bars_ago,
                 target_price, stop_loss, market_cap_cr, score, quantity,
                 total_investment, risk_reward_ratio, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 signal_data["symbol"],
                 signal_data.get("company_name", ""),
+                exchange,
+                dual_listed,
                 scan_date,
                 signal_data["current_price"],
                 signal_data["suggested_entry"],
@@ -72,6 +76,14 @@ def save_screener_results(signals: List[Dict[str, Any]], db_path=None) -> List[i
     return ids
 
 
+def _format_signal_row(row: Any) -> Dict[str, Any]:
+    """Formats a database row into a signal dictionary with exchange and dual_listed defaults."""
+    d = dict(row)
+    d["exchange"] = d.get("exchange") or "NSE"
+    d["dual_listed"] = bool(d.get("dual_listed", 0))
+    return d
+
+
 def get_latest_signals(limit: int = 100, db_path=None) -> List[Dict[str, Any]]:
     """Retrieves the latest signals sorted by scan_date and score descending."""
     conn = get_db_connection(db_path) if db_path else get_db_connection()
@@ -86,7 +98,7 @@ def get_latest_signals(limit: int = 100, db_path=None) -> List[Dict[str, Any]]:
             (limit,),
         )
         rows = cursor.fetchall()
-        return [dict(row) for row in rows]
+        return [_format_signal_row(row) for row in rows]
 
 
 def get_signal_by_id(signal_id: int, db_path=None) -> Optional[Dict[str, Any]]:
@@ -96,7 +108,7 @@ def get_signal_by_id(signal_id: int, db_path=None) -> Optional[Dict[str, Any]]:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM signals WHERE id = ?", (signal_id,))
         row = cursor.fetchone()
-        return dict(row) if row else None
+        return _format_signal_row(row) if row else None
 
 
 def update_signal_status(signal_id: int, status: str, db_path=None):

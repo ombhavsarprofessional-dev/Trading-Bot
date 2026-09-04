@@ -48,17 +48,26 @@
     <!-- Top Navbar -->
     <header class="top-navbar">
       <div class="brand-container">
-        <div class="brand-icon">NSE</div>
+        <div class="brand-icon">IN</div>
         <div>
-          <h1 class="brand-title">NSE Swing Trading Terminal</h1>
-          <div class="brand-subtitle">Double Pivot Support Confluence + RSI Bullish Divergence</div>
+          <h1 class="brand-title">Indian Equities Swing Terminal</h1>
+          <div class="brand-subtitle">Double Pivot Support Confluence + RSI Bullish Divergence (NSE &amp; BSE)</div>
         </div>
       </div>
 
       <div class="market-status-bar">
+        <div class="status-indicator-pill scan-time-pill" title="Timestamp of most recent screener run">
+          <span style="color: var(--text-muted);">Last scanned:</span>
+          <strong id="lastScannedDisplay">Today 03:32 PM IST</strong>
+        </div>
+
+        <div class="status-indicator-pill count-summary-pill">
+          <strong id="stockCountSummary" class="text-accent">Found 0 signals — NSE: 0 | BSE: 0</strong>
+        </div>
+
         <div class="status-indicator-pill">
           <span class="pulse-dot" id="marketDot"></span>
-          <span id="marketStatusText">Market Closed (Daily Scan at 3:30 PM IST)</span>
+          <span id="marketStatusText">Market Closed (Scan at 3:30 PM IST)</span>
         </div>
 
         <div class="status-indicator-pill">
@@ -84,11 +93,11 @@
       <section class="metrics-grid">
         <div class="metric-card">
           <div class="metric-header">
-            <span class="metric-title">NSE Universe</span>
+            <span class="metric-title">Stock Universe</span>
             <span class="metric-icon">🏢</span>
           </div>
           <div class="metric-value" id="statUniverseCount">--</div>
-          <div class="metric-subtext">Market Cap &gt; ₹2,000 Cr</div>
+          <div class="metric-subtext">NSE &amp; BSE &gt; ₹2,000 Cr</div>
         </div>
 
         <div class="metric-card">
@@ -119,6 +128,22 @@
         </div>
       </section>
 
+      <!-- Screener Live Status & Progress Bar -->
+      <div class="screener-status-card" id="screenerStatusBar">
+        <div class="status-bar-header">
+          <div class="status-bar-left">
+            <span class="pulse-dot" id="screenerDot"></span>
+            <span id="screenerStatusText" class="screener-title-text">Scan Complete</span>
+          </div>
+          <div class="status-bar-right">
+            <span id="screenerProgressStats" class="screener-count-text">Ready</span>
+          </div>
+        </div>
+        <div class="progress-track">
+          <div class="progress-fill" id="screenerProgressBar" style="width: 100%;"></div>
+        </div>
+      </div>
+
       <!-- Navigation Tabs & Manual Actions -->
       <div class="tabs-container">
         <nav class="nav-tabs" aria-label="Dashboard views">
@@ -143,7 +168,7 @@
             <option value="50">Quick (50 Stocks)</option>
             <option value="150">Top 150 Stocks</option>
             <option value="500">Nifty 500 (~500)</option>
-            <option value="">Full NSE Universe</option>
+            <option value="">Full NSE + BSE</option>
           </select>
 
           <button id="triggerScanBtn" class="btn btn-primary">
@@ -155,13 +180,30 @@
 
       <!-- TAB 1: SCREENER SIGNALS -->
       <section id="signalsTab" class="tab-content active">
-        <div class="table-card">
+        <div class="signals-view-header">
+          <div class="signals-header-left">
+            <span class="stock-count-chip" id="signalsCountChip">Found 0 signals — NSE: 0 | BSE: 0</span>
+          </div>
+          <div class="view-switch-group">
+            <button class="btn btn-sm btn-ghost active" id="viewCardsBtn" onclick="switchSignalsView('cards')">🎴 Cards View</button>
+            <button class="btn btn-sm btn-ghost" id="viewTableBtn" onclick="switchSignalsView('table')">📋 Table View</button>
+          </div>
+        </div>
+
+        <!-- CARDS VIEW (Primary) -->
+        <div id="signalsCardsContainer" class="signals-cards-grid">
+          <!-- Dynamic signal cards rendered by app.js -->
+        </div>
+
+        <!-- TABLE VIEW (Alternative) -->
+        <div id="signalsTableContainer" class="table-card" style="display: none;">
           <div class="table-responsive">
             <table class="data-table" id="signalsTable">
               <thead>
                 <tr>
                   <th>Score</th>
                   <th>Stock Symbol</th>
+                  <th>Exchange</th>
                   <th>Current Price</th>
                   <th>Confluence Zone</th>
                   <th>RSI &amp; Divergence</th>
@@ -175,7 +217,7 @@
               </thead>
               <tbody id="signalsTableBody">
                 <tr>
-                  <td colspan="11">
+                  <td colspan="12">
                     <div class="empty-state">
                       <div class="empty-icon">📊</div>
                       <div>No signals generated yet.</div>

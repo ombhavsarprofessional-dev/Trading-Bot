@@ -14,7 +14,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
 
-from screener.stock_fetcher import fetch_nse_equity_list, filter_stocks_by_market_cap
+from screener.stock_fetcher import (
+    fetch_nse_equity_list,
+    filter_stocks_by_market_cap,
+    fetch_bse_stocks,
+    fetch_all_stocks,
+    normalize_company_name,
+)
 from screener.pivot_calculator import (
     calculate_traditional_pivots,
     calculate_fibonacci_pivots,
@@ -23,12 +29,13 @@ from screener.pivot_calculator import (
     evaluate_pivot_confluence,
 )
 from screener.divergence_detector import calculate_rsi, detect_bullish_divergence
-from screener.engine import evaluate_stock, calculate_signal_score
+from screener.engine import evaluate_stock, calculate_signal_score, deduplicate_signals
 from scheduler.daily_scheduler import init_scheduler, get_scheduler_status
 from database.db import init_db, get_db_connection
 from database.models import (
     insert_signal,
     get_latest_signals,
+    get_signal_by_id,
     create_trade,
     get_active_trades,
     update_trade_pnl,
@@ -36,6 +43,7 @@ from database.models import (
 )
 from broker import get_broker
 from backend.app import app
+import config
 
 
 class TestNSETradingBot(unittest.TestCase):
@@ -156,9 +164,11 @@ class TestNSETradingBot(unittest.TestCase):
             index=dates,
         )
 
-        signal = evaluate_stock("TEST.NS", "Test Company Ltd", 25_000_000_000, df)
+        signal = evaluate_stock("TEST.NS", "Test Company Ltd", 25_000_000_000, df, exchange="NSE", dual_listed=False)
         self.assertIsNotNone(signal)
         self.assertEqual(signal["symbol"], "TEST.NS")
+        self.assertEqual(signal["exchange"], "NSE")
+        self.assertFalse(signal["dual_listed"])
         self.assertAlmostEqual(signal["suggested_entry"], 995.2, places=1)
         # Target must be +15%
         self.assertAlmostEqual(signal["target_price"], round(995.2 * 1.15, 2), places=1)
@@ -200,9 +210,15 @@ class TestNSETradingBot(unittest.TestCase):
             "quantity": 2,
             "total_investment": 7600.0,
             "risk_reward_ratio": 8.29,
+            "exchange": "NSE",
+            "dual_listed": 1,
         }
         sig_id = insert_signal(sig_data)
         self.assertIsInstance(sig_id, int)
+
+        fetched = get_signal_by_id(sig_id)
+        self.assertEqual(fetched["exchange"], "NSE")
+        self.assertEqual(fetched["dual_listed"], 1)
 
         # Create trade from signal
         trade_id = create_trade(
@@ -281,6 +297,74 @@ class TestNSETradingBot(unittest.TestCase):
         self.assertTrue((base / "deployment" / "README_DEPLOYMENT.md").exists())
         self.assertTrue((base / "frontend" / "_headers").exists())
         self.assertTrue((base / "frontend" / "_routes.json").exists())
+
+    # ─────────────────────────────────────────────────────────
+    # Module 11: BSE Stock Fetching, Normalization & Dedup
+    # ─────────────────────────────────────────────────────────
+    def test_11_bse_stocks_and_dedup(self):
+        # Test normalization
+        self.assertEqual(normalize_company_name("Reliance Industries Limited"), "reliance industries")
+        self.assertEqual(normalize_company_name("TATA MOTORS LTD."), "tata motors")
+        self.assertEqual(normalize_company_name("Infosys Technologies Pvt Ltd"), "infosys technologies")
+
+        # Test BSE stock fetching
+        bse_stocks = fetch_bse_stocks(min_market_cap_cr=2000)
+        self.assertIsInstance(bse_stocks, list)
+        self.assertGreater(len(bse_stocks), 0)
+        first = bse_stocks[0]
+        self.assertTrue(first["symbol"].endswith(".BO"))
+        self.assertEqual(first["exchange"], "BSE")
+        self.assertIn("company_name", first)
+
+        # Test fetch_all_stocks combined universe
+        all_stocks = fetch_all_stocks(limit_nse=10, min_market_cap_cr=2000)
+        self.assertIsInstance(all_stocks, list)
+        self.assertGreater(len(all_stocks), 0)
+        exchanges = {s["exchange"] for s in all_stocks}
+        self.assertIn("NSE", exchanges)
+        self.assertIn("BSE", exchanges)
+
+    # ─────────────────────────────────────────────────────────
+    # Module 12: Smart Signal Deduplication
+    # ─────────────────────────────────────────────────────────
+    def test_12_signal_deduplication(self):
+        # Test signals where same company exists on both NSE and BSE
+        raw_signals = [
+            {
+                "symbol": "500325.BO",
+                "company_name": "Reliance Industries Limited",
+                "exchange": "BSE",
+                "score": 8,
+                "current_price": 2800.0,
+            },
+            {
+                "symbol": "RELIANCE.NS",
+                "company_name": "Reliance Industries Ltd",
+                "exchange": "NSE",
+                "score": 8,
+                "current_price": 2802.0,
+            },
+            {
+                "symbol": "500002.BO",
+                "company_name": "ABB India Ltd",
+                "exchange": "BSE",
+                "score": 7,
+                "current_price": 4500.0,
+            },
+        ]
+        deduped = deduplicate_signals(raw_signals)
+        self.assertEqual(len(deduped), 2)
+        # RELIANCE should be preserved as NSE, marked dual_listed=True
+        reliance = next(s for s in deduped if "reliance" in s["company_name"].lower())
+        self.assertEqual(reliance["exchange"], "NSE")
+        self.assertEqual(reliance["symbol"], "RELIANCE.NS")
+        self.assertTrue(reliance["dual_listed"])
+
+    # ─────────────────────────────────────────────────────────
+    # Module 13: Config Fibonacci Tolerance
+    # ─────────────────────────────────────────────────────────
+    def test_13_config_tolerance(self):
+        self.assertEqual(config.FIBONACCI_PIVOT_TOLERANCE, 0.025)
 
 
 if __name__ == "__main__":

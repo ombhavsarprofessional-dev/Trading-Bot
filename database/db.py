@@ -82,6 +82,8 @@ def init_db(db_path=DATABASE_PATH):
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 symbol TEXT NOT NULL,
                 company_name TEXT,
+                exchange TEXT DEFAULT 'NSE',
+                dual_listed INTEGER DEFAULT 0,
                 scan_date TEXT NOT NULL,
                 current_price REAL NOT NULL,
                 suggested_entry REAL NOT NULL,
@@ -168,8 +170,28 @@ def init_db(db_path=DATABASE_PATH):
             )
             logger.info(f"Initialized default user '{DEFAULT_USERNAME}' in database.")
 
+        # Run graceful migrations for existing tables
+        migrate_db(conn)
+
         conn.commit()
     logger.info(f"Database initialized successfully at {db_path}")
+
+
+def migrate_db(conn):
+    """Gracefully migrates database schema for existing databases."""
+    cursor = conn.cursor()
+    cursor.execute("PRAGMA table_info(signals)")
+    cols = {row["name"] for row in cursor.fetchall()}
+
+    if "exchange" not in cols:
+        logger.info("Migrating signals table: adding 'exchange' column...")
+        cursor.execute("ALTER TABLE signals ADD COLUMN exchange TEXT DEFAULT 'NSE'")
+
+    if "dual_listed" not in cols:
+        logger.info("Migrating signals table: adding 'dual_listed' column...")
+        cursor.execute("ALTER TABLE signals ADD COLUMN dual_listed INTEGER DEFAULT 0")
+
+    conn.commit()
 
 
 if __name__ == "__main__":

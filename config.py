@@ -3,6 +3,10 @@ Configuration settings for NSE Swing Trading Stock Screener & Semi-Automated Bot
 """
 import os
 from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env if present
+load_dotenv()
 
 # Base Paths
 BASE_DIR = Path(__file__).resolve().parent
@@ -11,8 +15,10 @@ DATABASE_PATH = BASE_DIR / "database" / "trading_bot.db"
 os.makedirs(DATA_DIR, exist_ok=True)
 os.makedirs(DATABASE_PATH.parent, exist_ok=True)
 
-# NSE Universe & Market Cap Filter
+# NSE & BSE Universe & Market Cap Filter
 NSE_EQUITY_URL = "https://archives.nseindia.com/content/equities/EQUITY_L.csv"
+BSE_EQUITY_URL = "https://api.bseindia.com/BseIndiaAPI/api/ListofScripData/w?Group=&Scripcode=&industry=&segment=Equity&status=Active"
+BSE_BACKUP_URL = "https://www.bseindia.com/corporates/List_Scrips.html"
 MIN_MARKET_CAP_INR = 20_000_000_000  # ₹2,000 Crore INR (1 Cr = 10^7 INR)
 MARKET_CAP_CACHE_HOURS = 24  # Cache market caps to avoid redundant yfinance queries
 BATCH_SIZE = 50
@@ -28,7 +34,7 @@ S1_S2_MAX_GAP_RATIO = 0.015         # Gap between S1 and S2 < 1.5% of price
 # Criteria 2: Fibonacci Daily Pivots
 # S1 = P - 0.382 * (High - Low)
 # S2 = P - 0.618 * (High - Low)
-FIBONACCI_PIVOT_TOLERANCE = 0.010   # Within 1% tolerance of Fib S1 or S2
+FIBONACCI_PIVOT_TOLERANCE = 0.025   # Within 2.5% tolerance of Fib S1 or S2
 
 # Criteria 3: RSI Bullish Divergence
 RSI_PERIOD = 14
